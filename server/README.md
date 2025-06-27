@@ -85,7 +85,6 @@ QDRANT_PATH=./waterdrop_faq_qdrant
 
 3. Access the bot:
    - Web interface: Visit `http://localhost:7860`
-   - RTVI client: Connect to `ws://localhost:7860/rtvi/connect`
 
 ## Architecture
 
