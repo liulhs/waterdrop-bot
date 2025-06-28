@@ -126,7 +126,7 @@ async def create_room_and_token() -> tuple[str, str]:
     return room_url, token
 
 
-@app.get("/")
+@app.get("/start")
 async def start_agent(request: Request):
     """Endpoint for direct browser access to the bot.
 
