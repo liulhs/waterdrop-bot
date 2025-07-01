@@ -39,6 +39,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
@@ -200,12 +201,23 @@ async def main():
             voice_id="9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",
         )
 
+        # Debug logging to track context resets
+        original_flush_audio = tts.flush_audio
+        async def debug_flush_audio():
+            logger.warning("TTS Context being flushed - this may cause emotion drift!")
+            await original_flush_audio()
+        tts.flush_audio = debug_flush_audio
+
         # Initialize LLM service
         llm = LLM_WITH_TOOLS
         llm.register_function(
             "search_knowledge_base",
             search_knowledge_base,
         )
+
+        @llm.event_handler("on_function_calls_started")
+        async def on_function_calls_started(service, function_calls):
+            await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
 
         # Set up conversation context and management
         # The context_aggregator will automatically collect conversation context
@@ -242,11 +254,17 @@ async def main():
         )
         await task.queue_frame(quiet_frame)
 
+        # Flag to track if we've already handled client ready
+        client_ready_handled = False
+
         @rtvi.event_handler("on_client_ready")
         async def on_client_ready(rtvi):
-            await rtvi.set_bot_ready()
-            # Kick off the conversation
-            await task.queue_frames([context_aggregator.user().get_context_frame()])
+            nonlocal client_ready_handled
+            if not client_ready_handled:
+                client_ready_handled = True
+                await rtvi.set_bot_ready()
+                # Kick off the conversation only once
+                await task.queue_frames([context_aggregator.user().get_context_frame()])
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
