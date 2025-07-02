@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    restart: always
+    ports:
+      - 7860:7860
+    env_file:
+      - .env
+    environment:
+      - TZ=America/Los_Angeles
+    volumes:
+      - ./server:/app
+      - ./logs:/logs
+      - ./config:/config
+    command: >
+      bash -c "uvicorn main:app --host=0.0.0.0 --port=7860 --log-level info --access-log --reload"
+
+  proxy:
+    build:
+      context: ./be-proxy
+      dockerfile: Dockerfile
+    restart: always
+    ports:
+      - 8443:8000
+    env_file:
+      - .env
+    environment:
+      - TZ=America/Los_Angeles
+      - VA_API_URL=api:7860
+      - NODE_ENV=development
+    volumes:
+      - ./be-proxy:/app
+    command: >
+      bash -c "npm run dev"

@@ -4,7 +4,7 @@ const next = require("next");
 const { createProxyMiddleware } = require("http-proxy-middleware");
 const WebSocket = require("ws");
 
-const port = 3000;
+const port = process.env.PORT || 13000;
 const dev = process.env.NODE_ENV !== "production";
 const app = next({ dev });
 const handle = app.getRequestHandler();
