@@ -7,7 +7,7 @@ from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from prompts import DEFAULT_SYSTEM_PROMPT
+from prompts import DEFAULT_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT_JA
 
 load_dotenv(override=True)
 
@@ -44,7 +44,7 @@ def load_qdrant_from_disk(persist_path: str, collection_name: str) -> QdrantVect
     )
 
 TOOL_CONTEXT = OpenAILLMContext(
-    messages=[{"role": "system", "content": DEFAULT_SYSTEM_PROMPT}],
+    messages=[{"role": "system", "content": DEFAULT_SYSTEM_PROMPT_JA}],
     tools=retriever_tools
 )
 

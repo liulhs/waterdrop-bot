@@ -24,17 +24,9 @@ import sys
 import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
-from PIL import Image
-from runner import configure
 
+from runner import configure
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import (
-    BotStartedSpeakingFrame,
-    BotStoppedSpeakingFrame,
-    Frame,
-    OutputImageRawFrame,
-    SpriteFrame,
-)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -43,7 +35,8 @@ from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
-from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.transports.services.daily import DailyParams, DailyTransport, DailyTranscriptionSettings
+from pipecat.transcriptions.language import Language
 from pipecat.services.llm_service import FunctionCallParams
 from tool import TOOL_CONTEXT, LLM_WITH_TOOLS, load_qdrant_from_disk
 
@@ -51,62 +44,11 @@ load_dotenv(override=True)
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
-sprites = []
-script_dir = os.path.dirname(__file__)
-
-# Load sequential animation frames
-for i in range(1, 26):
-    # Build the full path to the image file
-    full_path = os.path.join(script_dir, f"assets/robot0{i}.png")
-    # Get the filename without the extension to use as the dictionary key
-    # Open the image and convert it to bytes
-    with Image.open(full_path) as img:
-        sprites.append(OutputImageRawFrame(image=img.tobytes(), size=img.size, format=img.format))
-
-# Create a smooth animation by adding reversed frames
-flipped = sprites[::-1]
-sprites.extend(flipped)
-
-# Define static and animated states
-quiet_frame = sprites[0]  # Static frame for when bot is listening
-talking_frame = SpriteFrame(images=sprites)  # Animation sequence for when bot is talking
 
 # Load vector store and perform search
 vector_store = load_qdrant_from_disk("./waterdrop_faq_qdrant", "waterdrop_faq")
 retriever = vector_store.as_retriever(k=4)
 
-
-class TalkingAnimation(FrameProcessor):
-    """Manages the bot's visual animation states.
-
-    Switches between static (listening) and animated (talking) states based on
-    the bot's current speaking status.
-    """
-
-    def __init__(self):
-        super().__init__()
-        self._is_talking = False
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process incoming frames and update animation state.
-
-        Args:
-            frame: The incoming frame to process
-            direction: The direction of frame flow in the pipeline
-        """
-        await super().process_frame(frame, direction)
-
-        # Switch to talking animation when bot starts speaking
-        if isinstance(frame, BotStartedSpeakingFrame):
-            if not self._is_talking:
-                await self.push_frame(talking_frame)
-                self._is_talking = True
-        # Return to static frame when bot stops speaking
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            await self.push_frame(quiet_frame)
-            self._is_talking = False
-
-        await self.push_frame(frame, direction)
 
 async def search_knowledge_base(params: FunctionCallParams):
     """
@@ -160,7 +102,6 @@ async def main():
     - Daily video transport
     - Speech-to-text and text-to-speech services
     - Language model integration
-    - Animation processing
     - RTVI event handling
     """
     async with aiohttp.ClientSession() as session:
@@ -174,39 +115,25 @@ async def main():
             DailyParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
-                video_out_enabled=True,
-                video_out_width=1024,
-                video_out_height=576,
+                video_out_enabled=False,
                 vad_analyzer=SileroVADAnalyzer(),
                 transcription_enabled=True,
+                transcription_settings=DailyTranscriptionSettings(
+                    language="ja",
+                ),
             ),
         )
-
-        # Initialize text-to-speech service
-        # tts = ElevenLabsTTSService(
-        #     api_key=os.getenv("ELEVENLABS_API_KEY"),
-        #     #
-        #     # English
-        #     #
-        #     voice_id="pNInz6obpgDQGcFmaJgB",
-        #     #
-        #     # Spanish
-        #     #
-        #     # model="eleven_multilingual_v2",
-        #     # voice_id="gD1IexrzCvsXPHUuT0s3",
-        # )
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
             voice_id="9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",
+            # voice_id="0cd0cde2-3b93-42b5-bcb9-f214a591aa29",
+            params=CartesiaTTSService.InputParams(
+                language=Language.JA,
+                # speed="normal"
+            )
         )
 
-        # Debug logging to track context resets
-        original_flush_audio = tts.flush_audio
-        async def debug_flush_audio():
-            logger.warning("TTS Context being flushed - this may cause emotion drift!")
-            await original_flush_audio()
-        tts.flush_audio = debug_flush_audio
 
         # Initialize LLM service
         llm = LLM_WITH_TOOLS
@@ -223,8 +150,6 @@ async def main():
         # The context_aggregator will automatically collect conversation context
         context_aggregator = llm.create_context_aggregator(TOOL_CONTEXT)
 
-        ta = TalkingAnimation()
-
         #
         # RTVI events for Pipecat client UI
         #
@@ -237,7 +162,6 @@ async def main():
                 context_aggregator.user(),
                 llm,
                 tts,
-                ta,
                 transport.output(),
                 context_aggregator.assistant(),
             ]
@@ -252,7 +176,8 @@ async def main():
             ),
             observers=[RTVIObserver(rtvi)],
         )
-        await task.queue_frame(quiet_frame)
+        # Remove initial animation frame
+        # await task.queue_frame(quiet_frame)
 
         # Flag to track if we've already handled client ready
         client_ready_handled = False
